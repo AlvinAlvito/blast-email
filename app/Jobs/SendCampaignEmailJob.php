@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Mail\CampaignEmail;
+use App\Models\Contact;
 use App\Models\CampaignRecipient;
 use App\Services\SenderAccountResolver;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -26,7 +27,43 @@ class SendCampaignEmailJob implements ShouldQueue
             ->with(['campaign', 'contact'])
             ->findOrFail($this->campaignRecipientId);
 
-        if ($recipient->status === 'sent' || ! $recipient->contact?->email) {
+        if (in_array($recipient->status, ['sent', 'cancelled'], true)) {
+            return;
+        }
+
+        if (! $recipient->campaign || $recipient->campaign->status === 'stopped') {
+            $recipient->update([
+                'status' => 'cancelled',
+                'failed_at' => now(),
+                'error_message' => 'Pengiriman dihentikan manual.',
+            ]);
+
+            return;
+        }
+
+        if ($recipient->campaign->status === 'paused') {
+            self::dispatch($recipient->id)->delay(now()->addSeconds(15));
+
+            return;
+        }
+
+        if (! $recipient->contact?->email) {
+            $recipient->update([
+                'status' => 'failed',
+                'failed_at' => now(),
+                'error_message' => 'Kontak tidak memiliki email yang valid.',
+            ]);
+
+            return;
+        }
+
+        if (in_array($recipient->contact->status, ['invalid_email', 'blocked'], true)) {
+            $recipient->update([
+                'status' => 'failed',
+                'failed_at' => now(),
+                'error_message' => 'Kontak ditandai bermasalah dan tidak dikirim ulang otomatis.',
+            ]);
+
             return;
         }
 
@@ -70,6 +107,14 @@ class SendCampaignEmailJob implements ShouldQueue
             'error_message' => null,
         ]);
 
+        if ($recipient->campaign && ! $recipient->campaign->recipients()->where('status', 'queued')->exists()) {
+            $hasFailures = $recipient->campaign->recipients()->whereIn('status', ['failed', 'cancelled'])->exists();
+            $recipient->campaign->update([
+                'status' => $hasFailures ? 'completed_with_issues' : 'completed',
+                'finished_at' => now(),
+            ]);
+        }
+
         $sender->forceFill([
             'sent_today' => $sender->sent_today + 1,
             'last_sent_at' => Carbon::now(),
@@ -78,12 +123,71 @@ class SendCampaignEmailJob implements ShouldQueue
 
     public function failed(\Throwable $exception): void
     {
-        CampaignRecipient::query()
-            ->whereKey($this->campaignRecipientId)
-            ->update([
-                'status' => 'failed',
-                'failed_at' => now(),
-                'error_message' => $exception->getMessage(),
-            ]);
+        $recipient = CampaignRecipient::query()
+            ->with('contact')
+            ->find($this->campaignRecipientId);
+
+        if (! $recipient) {
+            return;
+        }
+
+        $message = $exception->getMessage();
+        [$contactStatus, $shouldOptOut] = $this->classifyFailure($message);
+
+        $recipient->update([
+            'status' => 'failed',
+            'failed_at' => now(),
+            'error_message' => $message,
+        ]);
+
+        if ($recipient->contact && $contactStatus !== null) {
+            $recipient->contact->forceFill([
+                'status' => $contactStatus,
+                'email_opt_out' => $shouldOptOut ? true : $recipient->contact->email_opt_out,
+            ])->save();
+        }
+    }
+
+    protected function classifyFailure(string $message): array
+    {
+        $normalized = strtolower($message);
+
+        $invalidSignals = [
+            'recipient address rejected',
+            'invalid recipient',
+            'bad recipient',
+            'user unknown',
+            'mailbox unavailable',
+            'no such user',
+            'unknown user',
+            'unknown mailbox',
+            'domain not found',
+            'invalid address',
+            'address rejected',
+        ];
+
+        foreach ($invalidSignals as $signal) {
+            if (str_contains($normalized, $signal)) {
+                return ['invalid_email', true];
+            }
+        }
+
+        $blockedSignals = [
+            'spam',
+            'blocked',
+            'blacklist',
+            'rate limit',
+            'too many',
+            'suspend',
+            'policy rejection',
+        ];
+
+        foreach ($blockedSignals as $signal) {
+            if (str_contains($normalized, $signal)) {
+                return ['blocked', false];
+            }
+        }
+
+        return [null, false];
     }
 }

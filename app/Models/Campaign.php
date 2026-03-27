@@ -32,6 +32,11 @@ class Campaign extends Model
         'finished_at' => 'datetime',
     ];
 
+    public function isRunning(): bool
+    {
+        return $this->status === 'queued';
+    }
+
     public function recipients(): HasMany
     {
         return $this->hasMany(CampaignRecipient::class);

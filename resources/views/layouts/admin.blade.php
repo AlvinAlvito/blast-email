@@ -20,6 +20,8 @@
         .sidebar-foot { padding:16px; border-radius:18px; background:rgba(15,23,42,.44); border:1px solid rgba(148,163,184,.12); color:var(--sidebar-muted); font-size:13px; line-height:1.6; }
         .main { padding:28px; } .topbar,.panel-header,.card-top,.bar-meta { display:flex; align-items:center; justify-content:space-between; gap:12px; } .topbar { margin-bottom:24px; } .headline h2 { font-size:clamp(26px, 4vw, 40px); } .headline p { color:var(--muted); }
         .topbar-actions,.summary,.kpi-strip { display:flex; gap:12px; flex-wrap:wrap; }
+        .user-badge { display:inline-flex; align-items:center; gap:10px; padding:8px 14px; border-radius:14px; border:1px solid var(--line); background:#fff; color:var(--muted); font-size:13px; font-weight:700; }
+        .user-dot { width:10px; height:10px; border-radius:999px; background:linear-gradient(135deg, #12b76a, #53b1fd); box-shadow:0 0 0 5px rgba(18,183,106,.12); }
         .button,.button-secondary,.button-danger,.button-ghost { display:inline-flex; align-items:center; justify-content:center; gap:10px; min-height:46px; padding:0 16px; border-radius:14px; font-weight:700; border:1px solid transparent; }
         .button { background:linear-gradient(135deg, var(--brand), #2e90fa); color:#fff; box-shadow:0 16px 28px rgba(23,92,211,.16); } .button-secondary { background:var(--surface); color:var(--ink); border-color:var(--line); }
         .button-danger { background:rgba(240,68,56,.1); color:var(--danger); border-color:rgba(240,68,56,.18); }
@@ -43,8 +45,18 @@
         .pagination-link.active { background:linear-gradient(135deg, var(--brand), #2e90fa); border-color:transparent; color:#fff; }
         .pagination-link.disabled { color:var(--sidebar-muted); background:#f8fafc; }
         .chart-shell { height:230px; display:grid; align-items:end; grid-template-columns:repeat(6, minmax(0, 1fr)); gap:12px; padding-top:16px; } .chart-col { display:grid; gap:10px; justify-items:center; } .chart-bar { width:100%; border-radius:16px 16px 8px 8px; background:linear-gradient(180deg, #53b1fd, var(--brand)); min-height:10px; box-shadow:inset 0 -10px 22px rgba(15,23,42,.14); } .chart-value { font-size:12px; font-weight:700; }
+        .donut-grid { display:grid; grid-template-columns:220px 1fr; gap:22px; align-items:center; }
+        .donut-chart { width:220px; height:220px; border-radius:50%; position:relative; background:conic-gradient(var(--brand) 0deg 360deg); box-shadow:inset 0 0 0 1px rgba(15,23,42,.04); }
+        .donut-chart::after { content:""; position:absolute; inset:34px; border-radius:50%; background:var(--surface); box-shadow:inset 0 0 0 1px var(--line); }
+        .donut-center { position:absolute; inset:0; display:grid; place-items:center; text-align:center; z-index:1; padding:0 48px; font-weight:700; color:var(--ink); }
+        .donut-center span { display:block; font-size:12px; color:var(--muted); font-weight:600; }
+        .donut-legend { display:grid; gap:12px; }
+        .legend-item { display:grid; grid-template-columns:14px 1fr auto; gap:10px; align-items:center; padding:10px 12px; border:1px solid var(--line); border-radius:14px; background:linear-gradient(180deg, #fff, #fbfdff); }
+        .legend-dot { width:14px; height:14px; border-radius:999px; }
+        .legend-label { font-weight:600; }
+        .legend-value { color:var(--muted); font-size:13px; font-weight:700; }
         @media (max-width:1200px) { .metrics { grid-template-columns:repeat(2, minmax(0, 1fr)); } .content-grid,.analytics-grid,.two-col,.form-row { grid-template-columns:1fr; } }
-        @media (max-width:940px) { .app-shell { grid-template-columns:1fr; } .sidebar { position:static; height:auto; grid-template-rows:none; } .contact-row { grid-template-columns:1fr; } }
+        @media (max-width:940px) { .app-shell { grid-template-columns:1fr; } .sidebar { position:static; height:auto; grid-template-rows:none; } .contact-row,.donut-grid { grid-template-columns:1fr; } .donut-chart { margin:0 auto; } }
     </style>
 </head>
 <body>
@@ -64,7 +76,15 @@
     <main class="main">
         <div class="topbar">
             <div class="headline"><h2>{{ $pageTitle ?? 'Overview' }}</h2><p>{{ $pageDescription ?? 'Panel kontrol internal untuk operasional blast email POSI.' }}</p></div>
-            <div class="topbar-actions"><a class="button-secondary" href="{{ route('imports.template') }}">Download Format</a><a class="button" href="{{ route('admin.campaigns') }}">Buat Pengiriman</a></div>
+            <div class="topbar-actions">
+                <div class="user-badge"><span class="user-dot"></span>{{ session('admin_username', 'admin') }}</div>
+                <a class="button-secondary" href="{{ route('imports.template') }}">Download Format</a>
+                <a class="button" href="{{ route('admin.campaigns') }}">Buat Pengiriman</a>
+                <form action="{{ route('logout') }}" method="post" style="margin:0;">
+                    @csrf
+                    <button type="submit" class="button-secondary">Keluar</button>
+                </form>
+            </div>
         </div>
         @if (session('status'))
             <div class="flash">

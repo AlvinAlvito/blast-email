@@ -35,11 +35,15 @@
                             <div><div class="contact-name">{{ $contact->name ?: '-' }}</div><div class="contact-sub">No import: {{ $contact->import_no ?: '-' }}</div></div>
                             <div><div class="contact-name">{{ $contact->email ?: '-' }}</div><div class="contact-sub">{{ $contact->phone ?: '-' }}</div></div>
                             <div><div class="contact-name">{{ $contact->province ?: '-' }}</div><div class="contact-sub">{{ $contact->city ?: '-' }}</div></div>
-                            <div><div class="contact-name">{{ $contact->education_level ?: '-' }}</div><div class="contact-sub">Segment: {{ $contact->segment ?: '-' }}</div></div>
+                            <div>
+                                <div class="contact-name">{{ $contact->education_level ?: '-' }}</div>
+                                <div class="contact-sub">Segment: {{ $contact->segment ?: '-' }}</div>
+                                <div class="contact-sub" style="margin-top:6px;">Status email: {{ $contact->status ?: 'active' }}</div>
+                            </div>
                         </div>
                     @endforeach
                 </div>
-                <div style="margin-top:16px;">{{ $contacts->links() }}</div>
+                <div style="margin-top:16px;">{{ $contacts->links('vendor.pagination.dashboard') }}</div>
             @endif
         </div>
     </div>

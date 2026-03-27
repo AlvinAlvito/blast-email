@@ -17,6 +17,7 @@
                     <div class="kpi-strip">
                         <div class="kpi-pill">Header wajib: `no, nama, email, no hp, provinsi, kota, jenjang`</div>
                         <div class="kpi-pill">Mendukung `.xlsx`, `.xls`, `.csv`</div>
+                        <div class="kpi-pill">Sistem akan merapikan otomatis nilai seperti `SMA kelas 1`, `jabar`, atau `kab. bandung`.</div>
                     </div>
                     <button class="button" type="submit">Upload dan Import</button>
                 </form>
@@ -68,7 +69,7 @@
                 <div class="mini-grid">
                     <div class="kpi-pill">Pastikan header sesuai format resmi.</div>
                     <div class="kpi-pill">Nomor HP sebaiknya konsisten dan aktif.</div>
-                    <div class="kpi-pill">Jenjang akan dipakai sebagai segment campaign.</div>
+                    <div class="kpi-pill">Jenjang akan dinormalisasi dan dipakai sebagai segment campaign.</div>
                     <div class="kpi-pill">Email tidak valid akan diabaikan dari blast email.</div>
                 </div>
             </div>

@@ -9,8 +9,9 @@
     <div class="two-col">
         <div class="panel">
             <div class="panel-header"><div><h3>Buat Pengiriman Email</h3><p>Mulai dari batch kecil sebelum dikirim ke jumlah yang lebih besar.</p></div></div>
-            <form action="{{ route('campaigns.store') }}" method="post" class="form-grid">
+            <form action="{{ route('campaigns.store') }}" method="post" class="form-grid" id="campaign-create-form">
                 @csrf
+                <input type="hidden" name="form_nonce" value="{{ $formNonce }}">
                 <div class="kpi-strip">
                     <div class="kpi-pill">Placeholder `@{{nama}}` sekarang akan otomatis diganti nama kontak.</div>
                     <div class="kpi-pill">Secara default, kontak yang menerima email dalam 24 jam terakhir tidak dipilih lagi.</div>
@@ -49,7 +50,7 @@ Tim POSI</textarea></label>
                     </span>
                 </label>
                 <div class="form-row"><label>Jumlah kirim awal<input type="number" name="batch_size" value="50" min="1" max="500" required></label><label>Jeda antar email (detik)<input type="number" name="delay_seconds" value="10" min="0" max="600" required></label></div>
-                <button class="button" type="submit">Masukkan ke Antrean</button>
+                <button class="button" type="submit" id="campaign-submit-button">Masukkan ke Antrean</button>
             </form>
         </div>
         <div class="panel">
@@ -87,4 +88,20 @@ Tim POSI</textarea></label>
             @endif
         </div>
     </div>
+    <script>
+        (() => {
+            const form = document.getElementById('campaign-create-form');
+            const submitButton = document.getElementById('campaign-submit-button');
+
+            if (!form || !submitButton) {
+                return;
+            }
+
+            form.addEventListener('submit', () => {
+                submitButton.disabled = true;
+                submitButton.textContent = 'Memproses...';
+                submitButton.style.opacity = '0.7';
+            });
+        })();
+    </script>
 @endsection

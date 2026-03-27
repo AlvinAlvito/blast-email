@@ -16,12 +16,15 @@ class ExampleTest extends TestCase
     {
         $response = $this->get('/');
 
-        $response->assertStatus(200);
+        $response->assertRedirect('/login');
     }
 
     public function test_the_import_template_can_be_downloaded(): void
     {
-        $response = $this->get('/imports/template');
+        $response = $this->withSession([
+            'admin_authenticated' => true,
+            'admin_username' => 'posi',
+        ])->get('/imports/template');
 
         $response->assertOk();
         $response->assertHeader('content-type', 'text/csv; charset=UTF-8');

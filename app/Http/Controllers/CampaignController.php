@@ -10,6 +10,7 @@ use App\Models\ImportBatch;
 use Illuminate\Support\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class CampaignController extends Controller
 {
@@ -26,7 +27,15 @@ class CampaignController extends Controller
             'batch_size' => ['required', 'integer', 'min:1', 'max:500'],
             'delay_seconds' => ['required', 'integer', 'min:0', 'max:600'],
             'ignore_cooldown' => ['nullable', 'boolean'],
+            'form_nonce' => ['required', 'string'],
         ]);
+
+        $sessionNonce = (string) $request->session()->pull('campaign_form_nonce');
+        if ($sessionNonce === '' || ! hash_equals($sessionNonce, $data['form_nonce'])) {
+            return redirect()
+                ->route('admin.campaigns')
+                ->withErrors(['form_nonce' => 'Form pengiriman sudah diproses. Muat ulang halaman lalu coba lagi.']);
+        }
 
         $ignoreCooldown = (bool) ($data['ignore_cooldown'] ?? false);
 
@@ -49,6 +58,7 @@ class CampaignController extends Controller
         $contactsQuery = Contact::query()
             ->whereNotNull('email')
             ->where('email_opt_out', false)
+            ->whereNotIn('status', ['invalid_email', 'blocked'])
             ->when(
                 ! $ignoreCooldown,
                 fn ($query) => $query->whereDoesntHave('campaignRecipients', function ($recipientQuery) {
@@ -78,6 +88,63 @@ class CampaignController extends Controller
         }
 
         return redirect()->route('admin.campaigns')->with('status', "Campaign {$campaign->name} di-queue untuk {$contacts->count()} kontak.");
+    }
+
+    public function pause(Campaign $campaign): RedirectResponse
+    {
+        if ($campaign->status === 'queued') {
+            $campaign->update(['status' => 'paused']);
+        }
+
+        return redirect()
+            ->route('admin.campaigns.show', $campaign)
+            ->with('status', "Pengiriman {$campaign->name} dijeda.");
+    }
+
+    public function resume(Campaign $campaign): RedirectResponse
+    {
+        if (in_array($campaign->status, ['paused', 'draft'], true)) {
+            $campaign->update([
+                'status' => 'queued',
+                'started_at' => $campaign->started_at ?: now(),
+                'finished_at' => null,
+            ]);
+
+            $queuedRecipients = $campaign->recipients()
+                ->where('status', 'queued')
+                ->orderBy('id')
+                ->get();
+
+            foreach ($queuedRecipients as $index => $recipient) {
+                SendCampaignEmailJob::dispatch($recipient->id)->delay(now()->addSeconds($index * max(1, $campaign->delay_seconds)));
+            }
+        }
+
+        return redirect()
+            ->route('admin.campaigns.show', $campaign)
+            ->with('status', "Pengiriman {$campaign->name} dilanjutkan kembali.");
+    }
+
+    public function stop(Campaign $campaign): RedirectResponse
+    {
+        DB::transaction(function () use ($campaign) {
+            $campaign->update([
+                'status' => 'stopped',
+                'finished_at' => now(),
+            ]);
+
+            $campaign->recipients()
+                ->where('status', 'queued')
+                ->update([
+                    'status' => 'cancelled',
+                    'failed_at' => now(),
+                    'error_message' => 'Pengiriman dihentikan manual.',
+                ]);
+        });
+
+        return redirect()
+            ->route('admin.campaigns.show', $campaign)
+            ->with('status', "Pengiriman {$campaign->name} dihentikan.");
     }
 
     public function retryFailed(Campaign $campaign): RedirectResponse

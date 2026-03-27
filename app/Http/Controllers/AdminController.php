@@ -8,6 +8,7 @@ use App\Models\Contact;
 use App\Models\ImportBatch;
 use App\Models\SenderAccount;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 class AdminController extends Controller
@@ -44,7 +45,11 @@ class AdminController extends Controller
 
     public function campaigns(): View
     {
+        $formNonce = (string) Str::uuid();
+        session()->put('campaign_form_nonce', $formNonce);
+
         return view('admin.campaigns', $this->sharedData([
+            'formNonce' => $formNonce,
             'campaigns' => Campaign::query()
                 ->with('importBatch:id,title')
                 ->withCount([
@@ -109,6 +114,11 @@ class AdminController extends Controller
             ->groupBy('status')
             ->pluck('total', 'status');
 
+        $contactHealth = Contact::query()
+            ->select('status', DB::raw('count(*) as total'))
+            ->groupBy('status')
+            ->pluck('total', 'status');
+
         $campaigns = Campaign::query()
             ->withCount([
                 'recipients as sent_count' => fn ($query) => $query->where('status', 'sent'),
@@ -137,6 +147,7 @@ class AdminController extends Controller
             'contactsByLevel' => $contactsByLevel,
             'contactsByProvince' => $contactsByProvince,
             'campaignStatus' => $campaignStatus,
+            'contactHealth' => $contactHealth,
         ], $extra);
     }
 }
