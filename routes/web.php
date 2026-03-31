@@ -22,6 +22,7 @@ Route::middleware('admin.auth')->group(function () {
     Route::get('/campaigns', [AdminController::class, 'campaigns'])->name('admin.campaigns');
     Route::get('/analytics', [AdminController::class, 'analytics'])->name('admin.analytics');
     Route::get('/campaigns/{campaign}', [AdminController::class, 'campaignDetail'])->name('admin.campaigns.show');
+    Route::get('/campaigns/{campaign}/export-recipients', [AdminController::class, 'exportCampaignRecipients'])->name('admin.campaigns.export-recipients');
 
     Route::get('/imports/template', [ImportController::class, 'downloadTemplate'])->name('imports.template');
     Route::post('/imports', [ImportController::class, 'store'])->name('imports.store');
@@ -31,6 +32,7 @@ Route::middleware('admin.auth')->group(function () {
     Route::delete('/sender-accounts/{senderAccount}', [SenderAccountController::class, 'destroy'])->name('senders.destroy');
     Route::patch('/sender-accounts/{senderAccount}/toggle', [SenderAccountController::class, 'toggle'])->name('senders.toggle');
     Route::post('/sender-accounts/{senderAccount}/test', [SenderAccountController::class, 'test'])->name('senders.test');
+    Route::get('/campaigns/target-stats', [CampaignController::class, 'targetStats'])->name('campaigns.target-stats');
     Route::post('/campaigns', [CampaignController::class, 'store'])->name('campaigns.store');
     Route::post('/campaigns/{campaign}/retry-failed', [CampaignController::class, 'retryFailed'])->name('campaigns.retry-failed');
     Route::post('/campaigns/{campaign}/pause', [CampaignController::class, 'pause'])->name('campaigns.pause');

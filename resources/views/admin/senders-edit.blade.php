@@ -3,6 +3,8 @@
 @php
     $pageTitle = 'Edit Sender';
     $pageDescription = 'Perbarui konfigurasi SMTP, limit, dan identitas pengirim.';
+    $sentToday = $sender->effectiveSentToday();
+    $sentThisHour = $sender->effectiveSentThisHour();
 @endphp
 
 @section('content')
@@ -40,8 +42,8 @@
             <div class="panel-header"><div><h3>Info Sender</h3><p>Status operasional akun saat ini.</p></div></div>
             <div class="mini-grid">
                 <div class="kpi-pill">Status: {{ $sender->is_active ? 'Aktif' : 'Nonaktif' }}</div>
-                <div class="kpi-pill">Dikirim hari ini: {{ $sender->sent_today }}/{{ $sender->daily_limit }}</div>
-                <div class="kpi-pill">Batas per jam: {{ $sender->hourly_limit }}</div>
+                <div class="kpi-pill">Dikirim hari ini: {{ $sentToday }}/{{ $sender->daily_limit }}</div>
+                <div class="kpi-pill">Jam ini: {{ $sentThisHour }}/{{ $sender->hourly_limit }}</div>
                 <div class="kpi-pill">Last sent: {{ $sender->last_sent_at?->format('d M Y H:i') ?: '-' }}</div>
             </div>
         </div>

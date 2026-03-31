@@ -56,8 +56,11 @@
                 @else
                     <div class="bar-list">
                         @foreach ($senderAccounts as $sender)
-                            @php $ratio = $sender->daily_limit > 0 ? min(100, (int) round(($sender->sent_today / $sender->daily_limit) * 100)) : 0; @endphp
-                            <div class="bar-item"><div class="bar-meta"><strong>{{ $sender->name }}</strong><span>{{ $sender->sent_today }}/{{ $sender->daily_limit }}</span></div><div class="bar-track"><div class="bar-fill" style="width: {{ $ratio }}%"></div></div></div>
+                            @php
+                                $sentToday = $sender->effectiveSentToday();
+                                $ratio = $sender->daily_limit > 0 ? min(100, (int) round(($sentToday / $sender->daily_limit) * 100)) : 0;
+                            @endphp
+                            <div class="bar-item"><div class="bar-meta"><strong>{{ $sender->name }}</strong><span>{{ $sentToday }}/{{ $sender->daily_limit }}</span></div><div class="bar-track"><div class="bar-fill" style="width: {{ $ratio }}%"></div></div></div>
                         @endforeach
                     </div>
                 @endif

@@ -4,6 +4,7 @@
     $pageTitle = $campaignDetail->name;
     $pageDescription = 'Detail isi email, statistik pengiriman, dan daftar penerima untuk pengiriman ini.';
     $shouldPoll = in_array($campaignDetail->status, ['queued', 'paused'], true);
+    $availableQuotaNow = min($senderQuotaPool['daily_remaining'], $senderQuotaPool['hourly_remaining']);
 @endphp
 
 @section('content')
@@ -32,6 +33,7 @@
                 <div class="panel-header">
                     <div><h3>Preview Email</h3><p>Isi email yang dikirim untuk pengiriman ini.</p></div>
                     <div class="topbar-actions">
+                        <button class="button-secondary" type="button" id="campaign-rules-button">Aturan Pengiriman</button>
                         <button class="button-secondary" type="button" id="campaign-refresh-button">Refresh</button>
                         @if ($campaignDetail->status === 'queued')
                             <form action="{{ route('campaigns.pause', $campaignDetail) }}" method="post">
@@ -75,7 +77,7 @@
                 <div class="mini-grid">
                     <div class="kpi-pill">Status: <span data-campaign-status>{{ $campaignDetail->status }}</span></div>
                     <div class="kpi-pill">Target file: {{ $campaignDetail->importBatch?->file_name ?: '-' }}</div>
-                    <div class="kpi-pill">Batch size: {{ $campaignDetail->batch_size }}</div>
+                    <div class="kpi-pill">Total target: {{ number_format($campaignDetail->batch_size) }}</div>
                     <div class="kpi-pill">Delay: {{ $campaignDetail->delay_seconds }} detik</div>
                     <div class="kpi-pill">Started: {{ $campaignDetail->started_at?->format('d M Y H:i:s') ?: '-' }}</div>
                     <div class="kpi-pill">Finished: {{ $campaignDetail->finished_at?->format('d M Y H:i:s') ?: '-' }}</div>
@@ -85,7 +87,10 @@
         </div>
 
         <div class="panel">
-            <div class="panel-header"><div><h3>Daftar Penerima</h3><p>Menampilkan kontak, status kirim, sender yang digunakan, dan error jika gagal.</p></div></div>
+            <div class="panel-header">
+                <div><h3>Daftar Penerima</h3><p>Menampilkan kontak, status kirim, sender yang digunakan, dan error jika gagal.</p></div>
+                <a class="button-secondary" href="{{ route('admin.campaigns.export-recipients', $campaignDetail) }}">Export Excel</a>
+            </div>
             @if ($campaignRecipients->isEmpty())
                 <div class="empty">Belum ada penerima untuk pengiriman ini.</div>
             @else
@@ -110,14 +115,75 @@
             @endif
         </div>
     </div>
+
+    <div class="modal-backdrop" id="campaign-rules-modal" aria-hidden="true">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="campaign-rules-title">
+            <div class="modal-head">
+                <div>
+                    <h3 id="campaign-rules-title">Aturan Pengiriman</h3>
+                    <p>Ringkasan rule operasional yang dipakai campaign ini secara realtime.</p>
+                </div>
+                <button class="modal-close" type="button" id="campaign-rules-close" aria-label="Tutup">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="kpi-pill"><strong>Email kosong / tidak valid:</strong> recipient langsung ditandai gagal dan tidak dikirim.</div>
+                <div class="kpi-pill"><strong>Kontak berstatus `invalid_email` atau `blocked`:</strong> otomatis dilewati dan ditandai gagal.</div>
+                <div class="kpi-pill"><strong>Sender penuh kuota:</strong> recipient tidak gagal permanen, tetap `queued` dan dijadwalkan ulang saat slot sender tersedia.</div>
+                <div class="kpi-pill"><strong>Tidak ada sender aktif:</strong> recipient gagal karena sistem memang tidak punya akun aktif untuk mengirim.</div>
+                <div class="kpi-pill"><strong>Campaign dijeda:</strong> job akan menunggu dan mencoba lagi sampai campaign dilanjutkan.</div>
+                <div class="kpi-pill"><strong>Campaign dihentikan:</strong> semua recipient yang masih antre akan dibatalkan (`cancelled`).</div>
+                <div class="kpi-pill"><strong>Cooldown kontak:</strong> secara default kontak yang sudah menerima email dalam 24 jam terakhir tidak ikut dipilih lagi saat campaign dibuat.</div>
+                <div class="kpi-pill"><strong>Reset kuota:</strong> limit harian reset saat hari berganti, limit per jam reset saat jam berganti.</div>
+                <div class="kpi-pill"><strong>Pool sender aktif:</strong> {{ $senderQuotaPool['active_senders'] }} akun dengan kapasitas langsung saat ini {{ number_format($availableQuotaNow) }} email.</div>
+            </div>
+        </div>
+    </div>
+
     <script>
         (() => {
             const refreshButton = document.getElementById('campaign-refresh-button');
+            const rulesButton = document.getElementById('campaign-rules-button');
+            const rulesModal = document.getElementById('campaign-rules-modal');
+            const rulesClose = document.getElementById('campaign-rules-close');
             const shouldPoll = @json($shouldPoll);
 
             if (refreshButton) {
                 refreshButton.addEventListener('click', () => window.location.reload());
             }
+
+            const closeRulesModal = () => {
+                if (!rulesModal) {
+                    return;
+                }
+
+                rulesModal.classList.remove('active');
+                rulesModal.setAttribute('aria-hidden', 'true');
+            };
+
+            if (rulesButton && rulesModal) {
+                rulesButton.addEventListener('click', () => {
+                    rulesModal.classList.add('active');
+                    rulesModal.setAttribute('aria-hidden', 'false');
+                });
+            }
+
+            if (rulesClose) {
+                rulesClose.addEventListener('click', closeRulesModal);
+            }
+
+            if (rulesModal) {
+                rulesModal.addEventListener('click', (event) => {
+                    if (event.target === rulesModal) {
+                        closeRulesModal();
+                    }
+                });
+            }
+
+            window.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    closeRulesModal();
+                }
+            });
 
             if (shouldPoll) {
                 window.setInterval(() => window.location.reload(), 10000);

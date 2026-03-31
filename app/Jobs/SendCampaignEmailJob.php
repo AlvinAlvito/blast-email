@@ -3,12 +3,12 @@
 namespace App\Jobs;
 
 use App\Mail\CampaignEmail;
-use App\Models\Contact;
 use App\Models\CampaignRecipient;
 use App\Services\SenderAccountResolver;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
 
 class SendCampaignEmailJob implements ShouldQueue
@@ -23,102 +23,128 @@ class SendCampaignEmailJob implements ShouldQueue
 
     public function handle(SenderAccountResolver $resolver): void
     {
-        $recipient = CampaignRecipient::query()
-            ->with(['campaign', 'contact'])
-            ->findOrFail($this->campaignRecipientId);
+        $lock = Cache::lock("campaign-recipient:{$this->campaignRecipientId}", 30);
 
-        if (in_array($recipient->status, ['sent', 'cancelled'], true)) {
+        if (! $lock->get()) {
             return;
         }
 
-        if (! $recipient->campaign || $recipient->campaign->status === 'stopped') {
+        try {
+            $recipient = CampaignRecipient::query()
+                ->with(['campaign', 'contact'])
+                ->findOrFail($this->campaignRecipientId);
+
+            if (in_array($recipient->status, ['sent', 'cancelled'], true)) {
+                return;
+            }
+
+            if (! $recipient->campaign || $recipient->campaign->status === 'stopped') {
+                $recipient->update([
+                    'status' => 'cancelled',
+                    'failed_at' => now(),
+                    'error_message' => 'Pengiriman dihentikan manual.',
+                ]);
+
+                $this->finalizeCampaignIfFinished($recipient);
+
+                return;
+            }
+
+            if ($recipient->campaign->status === 'paused') {
+                return;
+            }
+
+            if (! $recipient->contact?->email) {
+                $recipient->update([
+                    'status' => 'failed',
+                    'failed_at' => now(),
+                    'error_message' => 'Kontak tidak memiliki email yang valid.',
+                ]);
+
+                $this->finalizeCampaignIfFinished($recipient);
+
+                return;
+            }
+
+            if (in_array($recipient->contact->status, ['invalid_email', 'blocked'], true)) {
+                $recipient->update([
+                    'status' => 'failed',
+                    'failed_at' => now(),
+                    'error_message' => 'Kontak ditandai bermasalah dan tidak dikirim ulang otomatis.',
+                ]);
+
+                $this->finalizeCampaignIfFinished($recipient);
+
+                return;
+            }
+
+            $sender = $resolver->next();
+
+            if (! $sender) {
+                if (! $resolver->hasActiveSender()) {
+                    $recipient->update([
+                        'status' => 'failed',
+                        'failed_at' => now(),
+                        'error_message' => 'Tidak ada sender account aktif yang tersedia.',
+                    ]);
+
+                    $this->finalizeCampaignIfFinished($recipient);
+
+                    return;
+                }
+
+                $retryAt = $resolver->nextAvailableAt() ?? now()->addMinutes(15);
+
+                $recipient->update([
+                    'status' => 'queued',
+                    'queued_at' => $retryAt,
+                    'error_message' => 'Menunggu kuota sender tersedia kembali.',
+                ]);
+
+                self::dispatch($recipient->id)->delay($retryAt);
+
+                return;
+            }
+
+            config([
+                'mail.default' => 'dynamic',
+                'mail.mailers.dynamic' => [
+                    'transport' => $sender->mailer,
+                    'host' => $sender->host,
+                    'port' => $sender->port,
+                    'encryption' => $sender->encryption ?: null,
+                    'username' => $sender->username,
+                    'password' => $sender->password,
+                    'timeout' => 20,
+                ],
+            ]);
+
+            Mail::mailer('dynamic')
+                ->to($recipient->contact->email)
+                ->send(
+                    (new CampaignEmail($recipient->campaign, $recipient->contact))
+                        ->from($sender->from_address, $sender->from_name)
+                        ->replyTo($sender->reply_to_address ?: $sender->from_address, $sender->from_name)
+                );
+
             $recipient->update([
-                'status' => 'cancelled',
-                'failed_at' => now(),
-                'error_message' => 'Pengiriman dihentikan manual.',
+                'sender_account_id' => $sender->id,
+                'status' => 'sent',
+                'sent_at' => now(),
+                'error_message' => null,
             ]);
 
-            return;
+            $this->finalizeCampaignIfFinished($recipient);
+
+            $sentAt = Carbon::now();
+
+            $sender->forceFill([
+                'sent_today' => $sender->effectiveSentToday($sentAt) + 1,
+                'last_sent_at' => $sentAt,
+            ])->save();
+        } finally {
+            optional($lock)->release();
         }
-
-        if ($recipient->campaign->status === 'paused') {
-            self::dispatch($recipient->id)->delay(now()->addSeconds(15));
-
-            return;
-        }
-
-        if (! $recipient->contact?->email) {
-            $recipient->update([
-                'status' => 'failed',
-                'failed_at' => now(),
-                'error_message' => 'Kontak tidak memiliki email yang valid.',
-            ]);
-
-            return;
-        }
-
-        if (in_array($recipient->contact->status, ['invalid_email', 'blocked'], true)) {
-            $recipient->update([
-                'status' => 'failed',
-                'failed_at' => now(),
-                'error_message' => 'Kontak ditandai bermasalah dan tidak dikirim ulang otomatis.',
-            ]);
-
-            return;
-        }
-
-        $sender = $resolver->next();
-
-        if (! $sender) {
-            $recipient->update([
-                'status' => 'failed',
-                'failed_at' => now(),
-                'error_message' => 'Tidak ada sender account aktif yang tersedia.',
-            ]);
-
-            return;
-        }
-
-        config([
-            'mail.default' => 'dynamic',
-            'mail.mailers.dynamic' => [
-                'transport' => $sender->mailer,
-                'host' => $sender->host,
-                'port' => $sender->port,
-                'encryption' => $sender->encryption ?: null,
-                'username' => $sender->username,
-                'password' => $sender->password,
-                'timeout' => 20,
-            ],
-        ]);
-
-        Mail::mailer('dynamic')
-            ->to($recipient->contact->email)
-            ->send(
-                (new CampaignEmail($recipient->campaign, $recipient->contact))
-                    ->from($sender->from_address, $sender->from_name)
-                    ->replyTo($sender->reply_to_address ?: $sender->from_address, $sender->from_name)
-            );
-
-        $recipient->update([
-            'sender_account_id' => $sender->id,
-            'status' => 'sent',
-            'sent_at' => now(),
-            'error_message' => null,
-        ]);
-
-        if ($recipient->campaign && ! $recipient->campaign->recipients()->where('status', 'queued')->exists()) {
-            $hasFailures = $recipient->campaign->recipients()->whereIn('status', ['failed', 'cancelled'])->exists();
-            $recipient->campaign->update([
-                'status' => $hasFailures ? 'completed_with_issues' : 'completed',
-                'finished_at' => now(),
-            ]);
-        }
-
-        $sender->forceFill([
-            'sent_today' => $sender->sent_today + 1,
-            'last_sent_at' => Carbon::now(),
-        ])->save();
     }
 
     public function failed(\Throwable $exception): void
@@ -146,6 +172,8 @@ class SendCampaignEmailJob implements ShouldQueue
                 'email_opt_out' => $shouldOptOut ? true : $recipient->contact->email_opt_out,
             ])->save();
         }
+
+        $this->finalizeCampaignIfFinished($recipient);
     }
 
     protected function classifyFailure(string $message): array
@@ -189,5 +217,23 @@ class SendCampaignEmailJob implements ShouldQueue
         }
 
         return [null, false];
+    }
+
+    protected function finalizeCampaignIfFinished(CampaignRecipient $recipient): void
+    {
+        if (! $recipient->campaign || $recipient->campaign->status === 'stopped') {
+            return;
+        }
+
+        if ($recipient->campaign->recipients()->where('status', 'queued')->exists()) {
+            return;
+        }
+
+        $hasFailures = $recipient->campaign->recipients()->whereIn('status', ['failed', 'cancelled'])->exists();
+
+        $recipient->campaign->update([
+            'status' => $hasFailures ? 'completed_with_issues' : 'completed',
+            'finished_at' => now(),
+        ]);
     }
 }

@@ -121,7 +121,6 @@ class ContactImportService
 
                     if ($existing) {
                         $existing->fill(array_filter($payload, fn ($value) => $value !== null && $value !== ''));
-                        $existing->import_batch_id = $batch->id;
                         $existing->save();
                         $summary['contacts_updated']++;
                         continue;

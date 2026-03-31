@@ -22,6 +22,20 @@
         .topbar-actions,.summary,.kpi-strip { display:flex; gap:12px; flex-wrap:wrap; }
         .user-badge { display:inline-flex; align-items:center; gap:10px; padding:8px 14px; border-radius:14px; border:1px solid var(--line); background:#fff; color:var(--muted); font-size:13px; font-weight:700; }
         .user-dot { width:10px; height:10px; border-radius:999px; background:linear-gradient(135deg, #12b76a, #53b1fd); box-shadow:0 0 0 5px rgba(18,183,106,.12); }
+        .header-badges { display:flex; gap:10px; flex-wrap:wrap; margin:-8px 0 18px; }
+        .quota-badge { display:inline-flex; align-items:center; gap:10px; padding:10px 14px; border-radius:999px; border:1px solid transparent; font-size:13px; font-weight:700; line-height:1.2; }
+        .quota-badge strong { font-size:14px; }
+        .quota-badge.pool { background:rgba(23,92,211,.1); border-color:rgba(23,92,211,.16); color:var(--brand); }
+        .quota-badge.daily { background:rgba(18,183,106,.1); border-color:rgba(18,183,106,.18); color:#0f8a53; }
+        .quota-badge.hourly { background:rgba(247,144,9,.12); border-color:rgba(247,144,9,.22); color:#b54708; }
+        .quota-badge.capacity { background:rgba(83,177,253,.14); border-color:rgba(83,177,253,.2); color:#175cd3; }
+        .modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.56); display:none; align-items:center; justify-content:center; padding:24px; z-index:999; }
+        .modal-backdrop.active { display:flex; }
+        .modal-card { width:min(860px, 100%); max-height:min(88vh, 920px); overflow:auto; background:var(--surface); border:1px solid var(--line); border-radius:24px; box-shadow:0 28px 64px rgba(15,23,42,.24); }
+        .modal-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:22px 24px 14px; border-bottom:1px solid #edf1f7; }
+        .modal-head p { margin:6px 0 0; color:var(--muted); }
+        .modal-body { padding:20px 24px 24px; display:grid; gap:12px; }
+        .modal-close { min-width:40px; min-height:40px; padding:0; border-radius:12px; border:1px solid var(--line); background:#fff; color:var(--ink); font-size:22px; line-height:1; cursor:pointer; }
         .button,.button-secondary,.button-danger,.button-ghost { display:inline-flex; align-items:center; justify-content:center; gap:10px; min-height:46px; padding:0 16px; border-radius:14px; font-weight:700; border:1px solid transparent; }
         .button { background:linear-gradient(135deg, var(--brand), #2e90fa); color:#fff; box-shadow:0 16px 28px rgba(23,92,211,.16); } .button-secondary { background:var(--surface); color:var(--ink); border-color:var(--line); }
         .button-danger { background:rgba(240,68,56,.1); color:var(--danger); border-color:rgba(240,68,56,.18); }

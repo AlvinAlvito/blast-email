@@ -7,7 +7,9 @@ use App\Models\Campaign;
 use App\Models\CampaignRecipient;
 use App\Models\Contact;
 use App\Models\ImportBatch;
+use App\Models\SenderAccount;
 use Illuminate\Support\Carbon;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -15,6 +17,37 @@ use Illuminate\Support\Facades\DB;
 class CampaignController extends Controller
 {
     protected const REQUEUE_COOLDOWN_HOURS = 24;
+
+    public function targetStats(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'segment' => ['nullable', 'string', 'max:255'],
+            'import_batch_id' => ['nullable', 'integer', 'exists:import_batches,id'],
+            'ignore_cooldown' => ['nullable', 'boolean'],
+        ]);
+
+        $ignoreCooldown = (bool) ($data['ignore_cooldown'] ?? false);
+        $targetedContactsQuery = $this->targetedContactsQuery($data);
+
+        $stats = [
+            'total_target_contacts' => (clone $targetedContactsQuery)->count(),
+            'with_email' => (clone $targetedContactsQuery)->whereNotNull('email')->count(),
+            'opted_out' => (clone $targetedContactsQuery)->where('email_opt_out', true)->count(),
+            'invalid_or_blocked' => (clone $targetedContactsQuery)->whereIn('status', ['invalid_email', 'blocked'])->count(),
+            'cooldown_blocked' => $ignoreCooldown ? 0 : (clone $targetedContactsQuery)
+                ->whereNotNull('email')
+                ->where('email_opt_out', false)
+                ->whereNotIn('status', ['invalid_email', 'blocked'])
+                ->whereHas('campaignRecipients', function ($recipientQuery) {
+                    $recipientQuery->whereIn('status', ['queued', 'sent'])
+                        ->where('created_at', '>=', Carbon::now()->subHours(self::REQUEUE_COOLDOWN_HOURS));
+                })
+                ->count(),
+            'emailable_now' => $this->emailableContactsQuery($data, $ignoreCooldown)->count(),
+        ];
+
+        return response()->json($stats);
+    }
 
     public function store(Request $request): RedirectResponse
     {
@@ -24,11 +57,17 @@ class CampaignController extends Controller
             'import_batch_id' => ['nullable', 'integer', 'exists:import_batches,id'],
             'subject' => ['required', 'string', 'max:255'],
             'body' => ['required', 'string'],
-            'batch_size' => ['required', 'integer', 'min:1', 'max:500'],
             'delay_seconds' => ['required', 'integer', 'min:0', 'max:600'],
             'ignore_cooldown' => ['nullable', 'boolean'],
             'form_nonce' => ['required', 'string'],
         ]);
+
+        if (! $this->hasActiveSender()) {
+            return redirect()
+                ->route('admin.campaigns')
+                ->withErrors(['subject' => 'Tidak ada sender aktif yang tersedia saat ini. Aktifkan minimal satu sender sebelum membuat campaign.'])
+                ->withInput();
+        }
 
         $sessionNonce = (string) $request->session()->pull('campaign_form_nonce');
         if ($sessionNonce === '' || ! hash_equals($sessionNonce, $data['form_nonce'])) {
@@ -47,47 +86,47 @@ class CampaignController extends Controller
             $segmentLabel = $data['segment'];
         }
 
+        $contactsQuery = $this->emailableContactsQuery($data, $ignoreCooldown);
+
+        $targetCount = (clone $contactsQuery)->count();
+
+        if ($targetCount < 1) {
+            return redirect()
+                ->route('admin.campaigns')
+                ->withErrors(['subject' => 'Tidak ada kontak emailable yang cocok dengan target yang dipilih.'])
+                ->withInput();
+        }
+
         $campaign = Campaign::create([
             ...$data,
             'segment' => $segmentLabel,
             'channel' => 'email',
             'status' => 'queued',
+            'batch_size' => $targetCount,
             'started_at' => now(),
         ]);
 
-        $contactsQuery = Contact::query()
-            ->whereNotNull('email')
-            ->where('email_opt_out', false)
-            ->whereNotIn('status', ['invalid_email', 'blocked'])
-            ->when(
-                ! $ignoreCooldown,
-                fn ($query) => $query->whereDoesntHave('campaignRecipients', function ($recipientQuery) {
-                    $recipientQuery->whereIn('status', ['queued', 'sent'])
-                        ->where('created_at', '>=', Carbon::now()->subHours(self::REQUEUE_COOLDOWN_HOURS));
-                })
-            )
-            ->when(
-                ! empty($data['import_batch_id']),
-                fn ($query) => $query->where('import_batch_id', $data['import_batch_id']),
-                fn ($query) => $query->when($data['segment'] ?? null, fn ($subQuery, $segment) => $subQuery->where('segment', $segment))
-            );
+        $dispatched = 0;
 
-        $contacts = $contactsQuery
-            ->limit($data['batch_size'])
-            ->get();
+        $contactsQuery
+            ->orderBy('id')
+            ->chunkById(500, function ($contacts) use ($campaign, $data, &$dispatched) {
+                foreach ($contacts as $contact) {
+                    $recipient = CampaignRecipient::create([
+                        'campaign_id' => $campaign->id,
+                        'contact_id' => $contact->id,
+                        'status' => 'queued',
+                        'queued_at' => now(),
+                    ]);
 
-        foreach ($contacts as $index => $contact) {
-            $recipient = CampaignRecipient::create([
-                'campaign_id' => $campaign->id,
-                'contact_id' => $contact->id,
-                'status' => 'queued',
-                'queued_at' => now(),
-            ]);
+                    SendCampaignEmailJob::dispatch($recipient->id)
+                        ->delay(now()->addSeconds($dispatched * $data['delay_seconds']));
 
-            SendCampaignEmailJob::dispatch($recipient->id)->delay(now()->addSeconds($index * $data['delay_seconds']));
-        }
+                    $dispatched++;
+                }
+            });
 
-        return redirect()->route('admin.campaigns')->with('status', "Campaign {$campaign->name} di-queue untuk {$contacts->count()} kontak.");
+        return redirect()->route('admin.campaigns')->with('status', "Campaign {$campaign->name} di-queue untuk {$targetCount} kontak.");
     }
 
     public function pause(Campaign $campaign): RedirectResponse
@@ -167,5 +206,49 @@ class CampaignController extends Controller
         return redirect()
             ->route('admin.campaigns.show', $campaign)
             ->with('status', "Retry di-queue untuk {$failedRecipients->count()} recipient gagal.");
+    }
+
+    protected function availableQuotaNow(): int
+    {
+        $activeSenders = SenderAccount::query()
+            ->where('is_active', true)
+            ->get();
+
+        $dailyRemaining = $activeSenders->sum(fn (SenderAccount $sender) => $sender->remainingDailyQuota());
+        $hourlyRemaining = $activeSenders->sum(fn (SenderAccount $sender) => $sender->remainingHourlyQuota());
+
+        return max(0, min($dailyRemaining, $hourlyRemaining));
+    }
+
+    protected function hasActiveSender(): bool
+    {
+        return SenderAccount::query()
+            ->where('is_active', true)
+            ->exists();
+    }
+
+    protected function targetedContactsQuery(array $data)
+    {
+        return Contact::query()
+            ->when(
+                ! empty($data['import_batch_id']),
+                fn ($query) => $query->where('import_batch_id', $data['import_batch_id']),
+                fn ($query) => $query->when($data['segment'] ?? null, fn ($subQuery, $segment) => $subQuery->where('segment', $segment))
+            );
+    }
+
+    protected function emailableContactsQuery(array $data, bool $ignoreCooldown)
+    {
+        return $this->targetedContactsQuery($data)
+            ->whereNotNull('email')
+            ->where('email_opt_out', false)
+            ->whereNotIn('status', ['invalid_email', 'blocked'])
+            ->when(
+                ! $ignoreCooldown,
+                fn ($query) => $query->whereDoesntHave('campaignRecipients', function ($recipientQuery) {
+                    $recipientQuery->whereIn('status', ['queued', 'sent'])
+                        ->where('created_at', '>=', Carbon::now()->subHours(self::REQUEUE_COOLDOWN_HOURS));
+                })
+            );
     }
 }

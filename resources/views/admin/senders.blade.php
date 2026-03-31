@@ -6,6 +6,13 @@
 @endphp
 
 @section('content')
+    <div class="header-badges">
+        <div class="quota-badge pool">Sender aktif <strong>{{ $senderQuotaPool['active_senders'] }}</strong> akun</div>
+        <div class="quota-badge daily">Sisa harian <strong>{{ number_format($senderQuotaPool['daily_remaining']) }}/{{ number_format($senderQuotaPool['daily_total_limit']) }}</strong></div>
+        <div class="quota-badge hourly">Sisa per jam <strong>{{ number_format($senderQuotaPool['hourly_remaining']) }}/{{ number_format($senderQuotaPool['hourly_total_limit']) }}</strong></div>
+        <div class="quota-badge capacity">Terpakai hari ini <strong>{{ number_format($senderQuotaPool['daily_used']) }}</strong></div>
+        <div class="quota-badge capacity">Terpakai jam ini <strong>{{ number_format($senderQuotaPool['hourly_used']) }}</strong></div>
+    </div>
     <div class="two-col">
         <div class="panel">
             <div class="panel-header"><div><h3>Tambah Sender Account</h3><p>Simpan kredensial SMTP dan limit pengiriman harian.</p></div></div>
@@ -79,12 +86,16 @@
             @else
                 <div class="bar-list">
                     @foreach ($senderAccounts as $sender)
-                        @php $ratio = $sender->daily_limit > 0 ? min(100, (int) round(($sender->sent_today / $sender->daily_limit) * 100)) : 0; @endphp
+                        @php
+                            $sentToday = $sender->effectiveSentToday();
+                            $sentThisHour = $sender->effectiveSentThisHour();
+                            $ratio = $sender->daily_limit > 0 ? min(100, (int) round(($sentToday / $sender->daily_limit) * 100)) : 0;
+                        @endphp
                         <div class="panel" style="padding:16px; border-radius:18px; box-shadow:none;">
                             <div class="bar-meta"><strong>{{ $sender->name }}</strong><span class="status {{ $sender->is_active ? 'sent' : 'failed' }}">{{ $sender->is_active ? 'aktif' : 'nonaktif' }}</span></div>
                             <div class="contact-sub" style="margin:6px 0 10px;">{{ $sender->from_address }} • {{ $sender->host }}:{{ $sender->port }} • {{ $sender->encryption ?: 'none' }}</div>
                             <div class="bar-track"><div class="bar-fill" style="width: {{ $ratio }}%"></div></div>
-                            <div class="bar-meta" style="margin-top:8px;"><span>{{ $sender->sent_today }}/{{ $sender->daily_limit }} per hari</span><span>{{ $sender->hourly_limit }} per jam</span></div>
+                            <div class="bar-meta" style="margin-top:8px;"><span>{{ $sentToday }}/{{ $sender->daily_limit }} per hari</span><span>{{ $sentThisHour }}/{{ $sender->hourly_limit }} per jam</span></div>
                             <div class="topbar-actions" style="margin-top:12px;">
                                 <a class="button-ghost" href="{{ route('senders.edit', $sender) }}">Edit</a>
                                 <form action="{{ route('senders.toggle', $sender) }}" method="post">
