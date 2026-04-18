@@ -7,18 +7,54 @@ use Illuminate\Http\Response;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class ImportController extends Controller
 {
     public function downloadTemplate(): Response
     {
-        $headers = implode(',', ContactImportService::REQUIRED_HEADERS);
-        $sample = implode(',', ['1', 'Budi Santoso', 'budi@example.com', '081234567890', 'Jawa Barat', 'Bandung', 'SMA']);
-        $content = $headers."\r\n".$sample."\r\n";
+        $headers = [
+            ...ContactImportService::REQUIRED_HEADERS,
+            'sekolah',
+            'bidang',
+            'no peserta',
+            'link kartu peserta',
+        ];
+
+        $sample = [
+            '1',
+            'Budi Santoso',
+            'budi@example.com',
+            '081234567890',
+            'Jawa Barat',
+            'Bandung',
+            'SMA',
+            'SMA Negeri 3 Bandung',
+            'Matematika',
+            'POSI-2026-001',
+            'https://contoh.posi.id/kartu/posi-2026-001',
+        ];
+
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Template Import');
+        $sheet->fromArray($headers, null, 'A1');
+        $sheet->fromArray($sample, null, 'A2');
+
+        foreach (range('A', 'K') as $column) {
+            $sheet->getColumnDimension($column)->setAutoSize(true);
+        }
+
+        $sheet->freezePane('A2');
+
+        ob_start();
+        (new Xlsx($spreadsheet))->save('php://output');
+        $content = ob_get_clean();
 
         return response($content, 200, [
-            'Content-Type' => 'text/csv; charset=UTF-8',
-            'Content-Disposition' => 'attachment; filename="format-import-kontak-posi.csv"',
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="format-import-kontak-posi.xlsx"',
         ]);
     }
 

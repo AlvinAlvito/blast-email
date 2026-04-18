@@ -16,6 +16,7 @@
                     <label>File kontak<input type="file" name="contacts_file" required></label>
                     <div class="kpi-strip">
                         <div class="kpi-pill">Header wajib: `no, nama, email, no hp, provinsi, kota, jenjang`</div>
+                        <div class="kpi-pill">Header opsional: `sekolah, bidang, no peserta, link kartu peserta`</div>
                         <div class="kpi-pill">Mendukung `.xlsx`, `.xls`, `.csv`</div>
                         <div class="kpi-pill">Sistem akan merapikan otomatis nilai seperti `SMA kelas 1`, `jabar`, atau `kab. bandung`.</div>
                     </div>
@@ -68,6 +69,7 @@
                 <div class="panel-header"><div><h3>Checklist Import</h3><p>Gunakan ini sebelum upload file besar.</p></div></div>
                 <div class="mini-grid">
                     <div class="kpi-pill">Pastikan header sesuai format resmi.</div>
+                    <div class="kpi-pill">Kolom `sekolah`, `bidang`, `no peserta`, dan `link kartu peserta` boleh kosong atau tidak ada.</div>
                     <div class="kpi-pill">Nomor HP sebaiknya konsisten dan aktif.</div>
                     <div class="kpi-pill">Jenjang akan dinormalisasi dan dipakai sebagai segment campaign.</div>
                     <div class="kpi-pill">Email tidak valid akan diabaikan dari blast email.</div>

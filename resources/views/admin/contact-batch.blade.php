@@ -29,20 +29,26 @@
             @if ($contacts->isEmpty())
                 <div class="empty">Batch ini belum memiliki kontak.</div>
             @else
-                <div class="contacts-grid">
-                    @foreach ($contacts as $contact)
-                        <div class="contact-row">
-                            <div><div class="contact-name">{{ $contact->name ?: '-' }}</div><div class="contact-sub">No import: {{ $contact->import_no ?: '-' }}</div></div>
-                            <div><div class="contact-name">{{ $contact->email ?: '-' }}</div><div class="contact-sub">{{ $contact->phone ?: '-' }}</div></div>
-                            <div><div class="contact-name">{{ $contact->province ?: '-' }}</div><div class="contact-sub">{{ $contact->city ?: '-' }}</div></div>
-                            <div>
-                                <div class="contact-name">{{ $contact->education_level ?: '-' }}</div>
-                                <div class="contact-sub">Segment: {{ $contact->segment ?: '-' }}</div>
-                                <div class="contact-sub" style="margin-top:6px;">Status email: {{ $contact->status ?: 'active' }}</div>
+                    <div class="contacts-grid">
+                        @foreach ($contacts as $contact)
+                            <div class="contact-row">
+                                <div><div class="contact-name">{{ $contact->name ?: '-' }}</div><div class="contact-sub">No import: {{ $contact->import_no ?: '-' }}</div></div>
+                                <div><div class="contact-name">{{ $contact->email ?: '-' }}</div><div class="contact-sub">{{ $contact->phone ?: '-' }}</div></div>
+                                <div><div class="contact-name">{{ $contact->province ?: '-' }}</div><div class="contact-sub">{{ $contact->city ?: '-' }}</div></div>
+                                <div>
+                                    <div class="contact-name">{{ $contact->education_level ?: '-' }}</div>
+                                    <div class="contact-sub">Segment: {{ $contact->segment ?: '-' }}</div>
+                                    <div class="contact-sub" style="margin-top:6px;">Status email: {{ $contact->status ?: 'active' }}</div>
+                                </div>
+                                <div>
+                                    <div class="contact-name">{{ $contact->school ?: '-' }}</div>
+                                    <div class="contact-sub">Bidang: {{ $contact->field ?: '-' }}</div>
+                                    <div class="contact-sub" style="margin-top:6px;">No peserta: {{ $contact->participant_no ?: '-' }}</div>
+                                    <div class="contact-sub" style="margin-top:6px;">Link kartu: {{ $contact->participant_card_link ?: '-' }}</div>
+                                </div>
                             </div>
-                        </div>
-                    @endforeach
-                </div>
+                        @endforeach
+                    </div>
                 <div style="margin-top:16px;">{{ $contacts->links('vendor.pagination.dashboard') }}</div>
             @endif
         </div>

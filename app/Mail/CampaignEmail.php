@@ -19,9 +19,16 @@ class CampaignEmail extends Mailable
         public Campaign $campaign,
         public Contact $contact
     ) {
-        $name = $this->contact->name ?: 'Peserta POSI';
-        $this->personalizedSubject = str_replace('{{nama}}', $name, $this->campaign->subject ?? $this->campaign->name);
-        $this->personalizedBody = str_replace('{{nama}}', $name, $this->campaign->body);
+        $replacements = [
+            '{{nama}}' => $this->contact->name ?: 'Peserta POSI',
+            '{{sekolah}}' => $this->contact->school ?: '-',
+            '{{bidang}}' => $this->contact->field ?: '-',
+            '{{peserta}}' => $this->contact->participant_no ?: '-',
+            '{{link}}' => $this->contact->participant_card_link ?: '-',
+        ];
+
+        $this->personalizedSubject = strtr($this->campaign->subject ?? $this->campaign->name, $replacements);
+        $this->personalizedBody = strtr($this->campaign->body, $replacements);
     }
 
     public function build(): self

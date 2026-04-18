@@ -120,7 +120,10 @@ class ContactImportService
                         ->first();
 
                     if ($existing) {
-                        $existing->fill(array_filter($payload, fn ($value) => $value !== null && $value !== ''));
+                        $existing->fill([
+                            ...array_filter($payload, fn ($value) => $value !== null && $value !== ''),
+                            'import_batch_id' => $batch->id,
+                        ]);
                         $existing->save();
                         $summary['contacts_updated']++;
                         continue;
@@ -200,6 +203,10 @@ class ContactImportService
         $province = $this->normalizeProvince($this->extractByKeywords($pairs, ['provinsi']));
         $city = $this->normalizeCity($this->extractByKeywords($pairs, ['kota', 'kabupaten']));
         $educationLevel = $this->normalizeEducationLevel($this->extractByKeywords($pairs, ['jenjang']));
+        $school = $this->normalizeText($this->extractByKeywords($pairs, ['sekolah', 'nama sekolah', 'asal sekolah']));
+        $field = $this->normalizeText($this->extractByKeywords($pairs, ['bidang', 'bidang lomba', 'kategori']));
+        $participantNo = $this->normalizeText($this->extractByKeywords($pairs, ['no peserta', 'nomor peserta', 'peserta', 'id peserta']));
+        $participantCardLink = $this->normalizeUrl($this->extractByKeywords($pairs, ['link kartu peserta', 'kartu peserta', 'link kartu', 'link']));
 
         return [
             'import_no' => $importNo ?: null,
@@ -209,6 +216,10 @@ class ContactImportService
             'province' => $province ?: null,
             'city' => $city ?: null,
             'education_level' => $educationLevel ?: null,
+            'school' => $school ?: null,
+            'field' => $field ?: null,
+            'participant_no' => $participantNo ?: null,
+            'participant_card_link' => $participantCardLink ?: null,
             'telegram' => null,
             'source_sheet' => $sheetTitle,
             'source_year' => $year,
@@ -366,6 +377,26 @@ class ContactImportService
             ->value();
 
         return Str::title(Str::lower($value));
+    }
+
+    protected function normalizeText(?string $value): ?string
+    {
+        if (! filled($value)) {
+            return null;
+        }
+
+        return trim(preg_replace('/\s+/', ' ', (string) $value) ?: (string) $value);
+    }
+
+    protected function normalizeUrl(?string $value): ?string
+    {
+        $value = $this->normalizeText($value);
+
+        if (! $value) {
+            return null;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_URL) ? $value : $value;
     }
 
     protected function extractYear(string $text): ?string

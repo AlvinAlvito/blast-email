@@ -86,14 +86,14 @@ class CampaignController extends Controller
             $segmentLabel = $data['segment'];
         }
 
-        $contactsQuery = $this->emailableContactsQuery($data, $ignoreCooldown);
+        $contactsQuery = $this->selectedContactsQuery($data, $ignoreCooldown);
 
         $targetCount = (clone $contactsQuery)->count();
 
         if ($targetCount < 1) {
             return redirect()
                 ->route('admin.campaigns')
-                ->withErrors(['subject' => 'Tidak ada kontak emailable yang cocok dengan target yang dipilih.'])
+                ->withErrors(['subject' => 'Tidak ada kontak yang cocok dengan target yang dipilih.'])
                 ->withInput();
         }
 
@@ -235,6 +235,15 @@ class CampaignController extends Controller
                 fn ($query) => $query->where('import_batch_id', $data['import_batch_id']),
                 fn ($query) => $query->when($data['segment'] ?? null, fn ($subQuery, $segment) => $subQuery->where('segment', $segment))
             );
+    }
+
+    protected function selectedContactsQuery(array $data, bool $ignoreCooldown)
+    {
+        if (! empty($data['import_batch_id'])) {
+            return $this->targetedContactsQuery($data);
+        }
+
+        return $this->emailableContactsQuery($data, $ignoreCooldown);
     }
 
     protected function emailableContactsQuery(array $data, bool $ignoreCooldown)

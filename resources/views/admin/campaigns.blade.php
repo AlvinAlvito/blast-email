@@ -47,6 +47,11 @@
                 </label>
                 <label>Isi email<textarea name="body" required>Halo @{{nama}},
 
+Sekolah: @{{sekolah}}
+Bidang: @{{bidang}}
+No Peserta: @{{peserta}}
+Link Kartu Peserta: @{{link}}
+
 Pendaftaran Olimpiade POSI terbaru sudah dibuka. Kalau kamu tertarik ikut lagi, balas email ini atau masuk ke landing page pendaftaran yang kamu siapkan.
 
 Salam,
@@ -115,7 +120,7 @@ Tim POSI</textarea></label>
             </div>
             <div class="modal-body">
                 <div class="kpi-strip">
-                    <div class="kpi-pill">Placeholder `@{{nama}}` akan otomatis diganti dengan nama kontak penerima.</div>
+                    <div class="kpi-pill">Placeholder `@{{nama}}`, `@{{sekolah}}`, `@{{bidang}}`, `@{{peserta}}`, dan `@{{link}}` akan otomatis diganti dari data kontak.</div>
                     <div class="kpi-pill">Secara default, kontak yang menerima email dalam 24 jam terakhir tidak dipilih lagi.</div>
                 </div>
                 <div class="mini-grid" id="campaign-target-preview">

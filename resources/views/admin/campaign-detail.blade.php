@@ -66,6 +66,7 @@
                 <div class="mini-grid">
                     <div class="kpi-pill"><strong>Subject:</strong> {{ $campaignDetail->subject }}</div>
                     <div class="kpi-pill"><strong>Nama pengiriman:</strong> {{ $campaignDetail->name }}</div>
+                    <div class="kpi-pill"><strong>Placeholder didukung:</strong> `@{{nama}}`, `@{{sekolah}}`, `@{{bidang}}`, `@{{peserta}}`, `@{{link}}`</div>
                 </div>
                 <div class="panel" style="margin-top:16px; box-shadow:none; padding:20px; border-radius:18px;">
                     <div style="font-size:15px; line-height:1.8; white-space:pre-wrap;">{{ $campaignDetail->body }}</div>
