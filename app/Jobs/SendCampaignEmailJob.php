@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Mail\CampaignEmail;
 use App\Models\CampaignRecipient;
+use App\Models\SenderAccount;
 use App\Services\SenderAccountResolver;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -119,20 +120,30 @@ class SendCampaignEmailJob implements ShouldQueue
                 ],
             ]);
 
-            Mail::mailer('dynamic')
-                ->to($recipient->contact->email)
-                ->send(
-                    (new CampaignEmail($recipient->campaign, $recipient->contact))
-                        ->from($sender->from_address, $sender->from_name)
-                        ->replyTo($sender->reply_to_address ?: $sender->from_address, $sender->from_name)
-                );
+            $recipient->forceFill([
+                'sender_account_id' => $sender->id,
+            ])->save();
+
+            try {
+                Mail::mailer('dynamic')
+                    ->to($recipient->contact->email)
+                    ->send(
+                        (new CampaignEmail($recipient->campaign, $recipient->contact))
+                            ->from($sender->from_address, $sender->from_name)
+                            ->replyTo($sender->reply_to_address ?: $sender->from_address, $sender->from_name)
+                    );
+            } catch (\Throwable $exception) {
+                $this->handleTransportFailure($recipient, $sender, $exception);
+
+                return;
+            }
 
             $recipient->update([
-                'sender_account_id' => $sender->id,
                 'status' => 'sent',
                 'sent_at' => now(),
                 'error_message' => null,
             ]);
+            $this->clearTransientRetryCounter();
 
             $this->finalizeCampaignIfFinished($recipient);
 
@@ -156,6 +167,8 @@ class SendCampaignEmailJob implements ShouldQueue
         if (! $recipient) {
             return;
         }
+
+        $this->clearTransientRetryCounter();
 
         $message = $exception->getMessage();
         [$contactStatus, $shouldOptOut] = $this->classifyFailure($message);
@@ -217,6 +230,84 @@ class SendCampaignEmailJob implements ShouldQueue
         }
 
         return [null, false];
+    }
+
+    protected function handleTransportFailure(CampaignRecipient $recipient, SenderAccount $sender, \Throwable $exception): void
+    {
+        $message = $exception->getMessage();
+        [$contactStatus, $shouldOptOut] = $this->classifyFailure($message);
+
+        if ($contactStatus !== null) {
+            $recipient->update([
+                'status' => 'failed',
+                'failed_at' => now(),
+                'error_message' => $message,
+            ]);
+
+            if ($recipient->contact) {
+                $recipient->contact->forceFill([
+                    'status' => $contactStatus,
+                    'email_opt_out' => $shouldOptOut ? true : $recipient->contact->email_opt_out,
+                ])->save();
+            }
+
+            $this->clearTransientRetryCounter();
+            $this->finalizeCampaignIfFinished($recipient);
+
+            return;
+        }
+
+        $retryCount = $this->incrementTransientRetryCounter();
+        $maxRetries = max(3, SenderAccount::query()->where('is_active', true)->count() + 1);
+
+        // Push a temporarily failing sender to the back of the rotation.
+        $sender->forceFill([
+            'last_sent_at' => now(),
+        ])->save();
+
+        if ($retryCount > $maxRetries) {
+            $recipient->update([
+                'status' => 'failed',
+                'failed_at' => now(),
+                'error_message' => $message,
+            ]);
+
+            $this->clearTransientRetryCounter();
+            $this->finalizeCampaignIfFinished($recipient);
+
+            return;
+        }
+
+        $retryAt = now()->addSeconds(20);
+
+        $recipient->update([
+            'status' => 'queued',
+            'queued_at' => $retryAt,
+            'failed_at' => null,
+            'error_message' => 'Retry via sender lain: '.$message,
+        ]);
+
+        self::dispatch($recipient->id)->delay($retryAt);
+    }
+
+    protected function incrementTransientRetryCounter(): int
+    {
+        $key = $this->transientRetryCacheKey();
+        $attempts = (int) Cache::get($key, 0) + 1;
+
+        Cache::put($key, $attempts, now()->addHours(6));
+
+        return $attempts;
+    }
+
+    protected function clearTransientRetryCounter(): void
+    {
+        Cache::forget($this->transientRetryCacheKey());
+    }
+
+    protected function transientRetryCacheKey(): string
+    {
+        return "campaign-recipient:{$this->campaignRecipientId}:transient-retries";
     }
 
     protected function finalizeCampaignIfFinished(CampaignRecipient $recipient): void
