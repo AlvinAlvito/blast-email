@@ -17,7 +17,10 @@ Route::post('/logout', [AuthController::class, 'logout'])->name('logout')->middl
 Route::middleware('admin.auth')->group(function () {
     Route::get('/', [AdminController::class, 'overview'])->name('admin.overview');
     Route::get('/contacts', [AdminController::class, 'contacts'])->name('admin.contacts');
+    Route::get('/contacts/issues', [AdminController::class, 'contactIssues'])->name('admin.contacts.issues');
     Route::get('/contacts/batches/{importBatch}', [AdminController::class, 'contactBatch'])->name('admin.contacts.batch');
+    Route::post('/contacts/{contact}/unblock', [AdminController::class, 'unblockContact'])->name('admin.contacts.unblock');
+    Route::post('/contacts/unblock-filtered', [AdminController::class, 'unblockFilteredContacts'])->name('admin.contacts.unblock-filtered');
     Route::get('/senders', [AdminController::class, 'senders'])->name('admin.senders');
     Route::get('/campaigns', [AdminController::class, 'campaigns'])->name('admin.campaigns');
     Route::get('/analytics', [AdminController::class, 'analytics'])->name('admin.analytics');

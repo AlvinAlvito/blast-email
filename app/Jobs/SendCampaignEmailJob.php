@@ -6,6 +6,7 @@ use App\Mail\CampaignEmail;
 use App\Models\CampaignRecipient;
 use App\Models\SenderAccount;
 use App\Services\SenderAccountResolver;
+use App\Support\MailFailureClassifier;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Carbon;
@@ -68,15 +69,23 @@ class SendCampaignEmailJob implements ShouldQueue
             }
 
             if (in_array($recipient->contact->status, ['invalid_email', 'blocked'], true)) {
-                $recipient->update([
-                    'status' => 'failed',
-                    'failed_at' => now(),
-                    'error_message' => 'Kontak ditandai bermasalah dan tidak dikirim ulang otomatis.',
-                ]);
+                if ($recipient->contact->status === 'blocked' && $this->canRestoreBlockedContact($recipient)) {
+                    $recipient->contact->forceFill([
+                        'status' => 'active',
+                    ])->save();
 
-                $this->finalizeCampaignIfFinished($recipient);
+                    $recipient->contact->refresh();
+                } else {
+                    $recipient->update([
+                        'status' => 'failed',
+                        'failed_at' => now(),
+                        'error_message' => 'Kontak ditandai bermasalah dan tidak dikirim ulang otomatis.',
+                    ]);
 
-                return;
+                    $this->finalizeCampaignIfFinished($recipient);
+
+                    return;
+                }
             }
 
             $sender = $resolver->next();
@@ -107,6 +116,8 @@ class SendCampaignEmailJob implements ShouldQueue
                 return;
             }
 
+            $this->resetDynamicMailer();
+
             config([
                 'mail.default' => 'dynamic',
                 'mail.mailers.dynamic' => [
@@ -136,6 +147,8 @@ class SendCampaignEmailJob implements ShouldQueue
                 $this->handleTransportFailure($recipient, $sender, $exception);
 
                 return;
+            } finally {
+                $this->resetDynamicMailer();
             }
 
             $recipient->update([
@@ -171,7 +184,7 @@ class SendCampaignEmailJob implements ShouldQueue
         $this->clearTransientRetryCounter();
 
         $message = $exception->getMessage();
-        [$contactStatus, $shouldOptOut] = $this->classifyFailure($message);
+        [$contactStatus, $shouldOptOut] = MailFailureClassifier::classify($message);
 
         $recipient->update([
             'status' => 'failed',
@@ -191,45 +204,7 @@ class SendCampaignEmailJob implements ShouldQueue
 
     protected function classifyFailure(string $message): array
     {
-        $normalized = strtolower($message);
-
-        $invalidSignals = [
-            'recipient address rejected',
-            'invalid recipient',
-            'bad recipient',
-            'user unknown',
-            'mailbox unavailable',
-            'no such user',
-            'unknown user',
-            'unknown mailbox',
-            'domain not found',
-            'invalid address',
-            'address rejected',
-        ];
-
-        foreach ($invalidSignals as $signal) {
-            if (str_contains($normalized, $signal)) {
-                return ['invalid_email', true];
-            }
-        }
-
-        $blockedSignals = [
-            'spam',
-            'blocked',
-            'blacklist',
-            'rate limit',
-            'too many',
-            'suspend',
-            'policy rejection',
-        ];
-
-        foreach ($blockedSignals as $signal) {
-            if (str_contains($normalized, $signal)) {
-                return ['blocked', false];
-            }
-        }
-
-        return [null, false];
+        return MailFailureClassifier::classify($message);
     }
 
     protected function handleTransportFailure(CampaignRecipient $recipient, SenderAccount $sender, \Throwable $exception): void
@@ -288,6 +263,36 @@ class SendCampaignEmailJob implements ShouldQueue
         ]);
 
         self::dispatch($recipient->id)->delay($retryAt);
+    }
+
+    protected function canRestoreBlockedContact(CampaignRecipient $recipient): bool
+    {
+        if (! $recipient->contact) {
+            return false;
+        }
+
+        if (MailFailureClassifier::isRetryableSenderFailure($recipient->error_message)) {
+            return true;
+        }
+
+        return $recipient->contact->campaignRecipients()
+            ->whereNotNull('error_message')
+            ->latest('updated_at')
+            ->get()
+            ->contains(fn (CampaignRecipient $history) => MailFailureClassifier::isRetryableSenderFailure($history->error_message));
+    }
+
+    protected function resetDynamicMailer(): void
+    {
+        $mailManager = app('mail.manager');
+
+        if (method_exists($mailManager, 'forgetMailers')) {
+            $mailManager->forgetMailers();
+        }
+
+        if (method_exists($mailManager, 'purge')) {
+            $mailManager->purge('dynamic');
+        }
     }
 
     protected function incrementTransientRetryCounter(): int

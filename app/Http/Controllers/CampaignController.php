@@ -8,6 +8,7 @@ use App\Models\CampaignRecipient;
 use App\Models\Contact;
 use App\Models\ImportBatch;
 use App\Models\SenderAccount;
+use App\Support\MailFailureClassifier;
 use Illuminate\Support\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -189,15 +190,22 @@ class CampaignController extends Controller
     public function retryFailed(Campaign $campaign): RedirectResponse
     {
         $failedRecipients = $campaign->recipients()
+            ->with(['contact.campaignRecipients'])
             ->where('status', 'failed')
             ->get();
 
         foreach ($failedRecipients as $index => $recipient) {
+            if ($recipient->contact && $recipient->contact->status === 'blocked' && $this->canRestoreBlockedContact($recipient->contact)) {
+                $recipient->contact->forceFill([
+                    'status' => 'active',
+                ])->save();
+            }
+
             $recipient->update([
                 'status' => 'queued',
                 'queued_at' => now(),
                 'failed_at' => null,
-                'error_message' => null,
+                'sender_account_id' => null,
             ]);
 
             SendCampaignEmailJob::dispatch($recipient->id)->delay(now()->addSeconds($index * max(1, $campaign->delay_seconds)));
@@ -206,6 +214,19 @@ class CampaignController extends Controller
         return redirect()
             ->route('admin.campaigns.show', $campaign)
             ->with('status', "Retry di-queue untuk {$failedRecipients->count()} recipient gagal.");
+    }
+
+    protected function canRestoreBlockedContact(Contact $contact): bool
+    {
+        $failures = $contact->campaignRecipients
+            ->pluck('error_message')
+            ->filter(fn ($message) => is_string($message) && $message !== '');
+
+        if ($failures->contains(fn ($message) => MailFailureClassifier::isPermanentContactFailure($message))) {
+            return false;
+        }
+
+        return $failures->contains(fn ($message) => MailFailureClassifier::isRetryableSenderFailure($message));
     }
 
     protected function availableQuotaNow(): int

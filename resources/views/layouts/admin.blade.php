@@ -81,6 +81,7 @@
             <div class="sidebar-label">Navigation</div>
             <a href="{{ route('admin.overview') }}" class="nav-link {{ request()->routeIs('admin.overview') ? 'active' : '' }}"><span>Overview</span><span class="nav-meta">{{ number_format($stats['contacts']) }}</span></a>
             <a href="{{ route('admin.contacts') }}" class="nav-link {{ request()->routeIs('admin.contacts') ? 'active' : '' }}"><span>Contacts</span><span class="nav-meta">{{ number_format($stats['emailable_contacts']) }}</span></a>
+            <a href="{{ route('admin.contacts.issues') }}" class="nav-link {{ request()->routeIs('admin.contacts.issues') ? 'active' : '' }}"><span>Kontak Error</span><span class="nav-meta">{{ number_format($stats['problem_contacts']) }}</span></a>
             <a href="{{ route('admin.senders') }}" class="nav-link {{ request()->routeIs('admin.senders') ? 'active' : '' }}"><span>Senders</span><span class="nav-meta">{{ number_format($stats['senders']) }}</span></a>
             <a href="{{ route('admin.campaigns') }}" class="nav-link {{ request()->routeIs('admin.campaigns') ? 'active' : '' }}"><span>Pengiriman</span><span class="nav-meta">{{ number_format($stats['campaigns']) }}</span></a>
             <a href="{{ route('admin.analytics') }}" class="nav-link {{ request()->routeIs('admin.analytics') ? 'active' : '' }}"><span>Analytics</span><span class="nav-meta">{{ number_format($stats['sent_recipients']) }}</span></a>
