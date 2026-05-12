@@ -49,4 +49,22 @@ class Contact extends Model
     {
         return $this->belongsTo(ImportBatch::class);
     }
+
+    public function deliveryEmail(): ?string
+    {
+        $campaignRowEmail = data_get($this->meta, 'campaign_row_email');
+
+        if (is_string($campaignRowEmail) && trim($campaignRowEmail) !== '') {
+            return $campaignRowEmail;
+        }
+
+        return $this->email;
+    }
+
+    public function masterContactId(): ?int
+    {
+        $masterContactId = data_get($this->meta, 'master_contact_id');
+
+        return is_numeric($masterContactId) ? (int) $masterContactId : null;
+    }
 }

@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Mail\CampaignEmail;
 use App\Models\CampaignRecipient;
+use App\Models\Contact;
 use App\Models\SenderAccount;
 use App\Services\SenderAccountResolver;
 use App\Support\MailFailureClassifier;
@@ -56,7 +57,9 @@ class SendCampaignEmailJob implements ShouldQueue
                 return;
             }
 
-            if (! $recipient->contact?->email) {
+            $deliveryEmail = $recipient->contact?->deliveryEmail();
+
+            if (! $deliveryEmail) {
                 $recipient->update([
                     'status' => 'failed',
                     'failed_at' => now(),
@@ -137,7 +140,7 @@ class SendCampaignEmailJob implements ShouldQueue
 
             try {
                 Mail::mailer('dynamic')
-                    ->to($recipient->contact->email)
+                    ->to($deliveryEmail)
                     ->send(
                         (new CampaignEmail($recipient->campaign, $recipient->contact))
                             ->from($sender->from_address, $sender->from_name)
@@ -193,10 +196,7 @@ class SendCampaignEmailJob implements ShouldQueue
         ]);
 
         if ($recipient->contact && $contactStatus !== null) {
-            $recipient->contact->forceFill([
-                'status' => $contactStatus,
-                'email_opt_out' => $shouldOptOut ? true : $recipient->contact->email_opt_out,
-            ])->save();
+            $this->applyFailureStatusToContacts($recipient->contact, $contactStatus, $shouldOptOut);
         }
 
         $this->finalizeCampaignIfFinished($recipient);
@@ -220,10 +220,7 @@ class SendCampaignEmailJob implements ShouldQueue
             ]);
 
             if ($recipient->contact) {
-                $recipient->contact->forceFill([
-                    'status' => $contactStatus,
-                    'email_opt_out' => $shouldOptOut ? true : $recipient->contact->email_opt_out,
-                ])->save();
+                $this->applyFailureStatusToContacts($recipient->contact, $contactStatus, $shouldOptOut);
             }
 
             $this->clearTransientRetryCounter();
@@ -275,11 +272,19 @@ class SendCampaignEmailJob implements ShouldQueue
             return true;
         }
 
-        return $recipient->contact->campaignRecipients()
-            ->whereNotNull('error_message')
-            ->latest('updated_at')
-            ->get()
-            ->contains(fn (CampaignRecipient $history) => MailFailureClassifier::isRetryableSenderFailure($history->error_message));
+        foreach ($this->contactsToInspect($recipient->contact) as $contact) {
+            $hasRetryableFailure = $contact->campaignRecipients()
+                ->whereNotNull('error_message')
+                ->latest('updated_at')
+                ->get()
+                ->contains(fn (CampaignRecipient $history) => MailFailureClassifier::isRetryableSenderFailure($history->error_message));
+
+            if ($hasRetryableFailure) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected function resetDynamicMailer(): void
@@ -313,6 +318,35 @@ class SendCampaignEmailJob implements ShouldQueue
     protected function transientRetryCacheKey(): string
     {
         return "campaign-recipient:{$this->campaignRecipientId}:transient-retries";
+    }
+
+    protected function applyFailureStatusToContacts(Contact $contact, string $status, bool $shouldOptOut): void
+    {
+        foreach ($this->contactsToInspect($contact) as $relatedContact) {
+            $relatedContact->forceFill([
+                'status' => $status,
+                'email_opt_out' => $shouldOptOut ? true : $relatedContact->email_opt_out,
+            ])->save();
+        }
+    }
+
+    /**
+     * @return array<int, Contact>
+     */
+    protected function contactsToInspect(Contact $contact): array
+    {
+        $contacts = [$contact];
+        $masterContactId = $contact->masterContactId();
+
+        if ($masterContactId && $masterContactId !== $contact->id) {
+            $masterContact = Contact::find($masterContactId);
+
+            if ($masterContact) {
+                $contacts[] = $masterContact;
+            }
+        }
+
+        return $contacts;
     }
 
     protected function finalizeCampaignIfFinished(CampaignRecipient $recipient): void

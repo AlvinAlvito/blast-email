@@ -103,7 +103,7 @@
                     @foreach ($campaignRecipients as $recipient)
                         <tr>
                             <td>{{ $recipient->contact?->name ?: '-' }}</td>
-                            <td>{{ $recipient->contact?->email ?: '-' }}</td>
+                            <td>{{ $recipient->contact?->deliveryEmail() ?: '-' }}</td>
                             <td>{{ $recipient->senderAccount?->from_address ?: '-' }}</td>
                             <td><span class="status {{ $recipient->status }}">{{ $recipient->status }}</span></td>
                             <td>{{ optional($recipient->sent_at ?? $recipient->queued_at ?? $recipient->failed_at)?->format('d M Y H:i:s') ?: '-' }}</td>

@@ -8,18 +8,20 @@ use App\Models\CampaignRecipient;
 use App\Models\Contact;
 use App\Models\ImportBatch;
 use App\Models\SenderAccount;
+use App\Services\ContactImportService;
 use App\Support\MailFailureClassifier;
 use Illuminate\Support\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class CampaignController extends Controller
 {
     protected const REQUEUE_COOLDOWN_HOURS = 24;
 
-    public function targetStats(Request $request): JsonResponse
+    public function targetStats(Request $request, ContactImportService $importService): JsonResponse
     {
         $data = $request->validate([
             'segment' => ['nullable', 'string', 'max:255'],
@@ -28,6 +30,13 @@ class CampaignController extends Controller
         ]);
 
         $ignoreCooldown = (bool) ($data['ignore_cooldown'] ?? false);
+
+        if (! empty($data['import_batch_id'])) {
+            $batch = ImportBatch::findOrFail($data['import_batch_id']);
+
+            return response()->json($this->batchTargetStats($batch, $ignoreCooldown, $importService));
+        }
+
         $targetedContactsQuery = $this->targetedContactsQuery($data);
 
         $stats = [
@@ -50,7 +59,7 @@ class CampaignController extends Controller
         return response()->json($stats);
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request, ContactImportService $importService): RedirectResponse
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
@@ -87,9 +96,16 @@ class CampaignController extends Controller
             $segmentLabel = $data['segment'];
         }
 
-        $contactsQuery = $this->selectedContactsQuery($data, $ignoreCooldown);
+        $campaignRows = collect();
+        $contactsQuery = null;
 
-        $targetCount = (clone $contactsQuery)->count();
+        if (! empty($data['import_batch_id'])) {
+            $campaignRows = collect($importService->readCampaignRows($batch->stored_path));
+            $targetCount = $campaignRows->count();
+        } else {
+            $contactsQuery = $this->selectedContactsQuery($data, $ignoreCooldown);
+            $targetCount = (clone $contactsQuery)->count();
+        }
 
         if ($targetCount < 1) {
             return redirect()
@@ -109,23 +125,27 @@ class CampaignController extends Controller
 
         $dispatched = 0;
 
-        $contactsQuery
-            ->orderBy('id')
-            ->chunkById(500, function ($contacts) use ($campaign, $data, &$dispatched) {
-                foreach ($contacts as $contact) {
-                    $recipient = CampaignRecipient::create([
-                        'campaign_id' => $campaign->id,
-                        'contact_id' => $contact->id,
-                        'status' => 'queued',
-                        'queued_at' => now(),
-                    ]);
+        if ($campaignRows->isNotEmpty()) {
+            $this->queueBatchRows($campaign, $campaignRows, $data['delay_seconds'], $dispatched);
+        } else {
+            $contactsQuery
+                ->orderBy('id')
+                ->chunkById(500, function ($contacts) use ($campaign, $data, &$dispatched) {
+                    foreach ($contacts as $contact) {
+                        $recipient = CampaignRecipient::create([
+                            'campaign_id' => $campaign->id,
+                            'contact_id' => $contact->id,
+                            'status' => 'queued',
+                            'queued_at' => now(),
+                        ]);
 
-                    SendCampaignEmailJob::dispatch($recipient->id)
-                        ->delay(now()->addSeconds($dispatched * $data['delay_seconds']));
+                        SendCampaignEmailJob::dispatch($recipient->id)
+                            ->delay(now()->addSeconds($dispatched * $data['delay_seconds']));
 
-                    $dispatched++;
-                }
-            });
+                        $dispatched++;
+                    }
+                });
+        }
 
         return redirect()->route('admin.campaigns')->with('status', "Campaign {$campaign->name} di-queue untuk {$targetCount} kontak.");
     }
@@ -251,6 +271,7 @@ class CampaignController extends Controller
     protected function targetedContactsQuery(array $data)
     {
         return Contact::query()
+            ->where('is_duplicate', false)
             ->when(
                 ! empty($data['import_batch_id']),
                 fn ($query) => $query->where('import_batch_id', $data['import_batch_id']),
@@ -280,5 +301,121 @@ class CampaignController extends Controller
                         ->where('created_at', '>=', Carbon::now()->subHours(self::REQUEUE_COOLDOWN_HOURS));
                 })
             );
+    }
+
+    protected function batchTargetStats(ImportBatch $batch, bool $ignoreCooldown, ContactImportService $importService): array
+    {
+        $rows = collect($importService->readCampaignRows($batch->stored_path));
+        $contactsByEmail = $this->contactsByEmailFromRows($rows);
+        $cooldownBlockedContactIds = $ignoreCooldown
+            ? collect()
+            : CampaignRecipient::query()
+                ->whereIn('contact_id', $contactsByEmail->pluck('id'))
+                ->whereIn('status', ['queued', 'sent'])
+                ->where('created_at', '>=', Carbon::now()->subHours(self::REQUEUE_COOLDOWN_HOURS))
+                ->pluck('contact_id')
+                ->flip();
+
+        $withEmail = $rows->filter(fn (array $row) => filled($row['email'] ?? null));
+        $optedOut = $withEmail->filter(function (array $row) use ($contactsByEmail) {
+            $contact = $contactsByEmail->get($row['email']);
+
+            return (bool) $contact?->email_opt_out;
+        });
+        $invalidOrBlocked = $withEmail->filter(function (array $row) use ($contactsByEmail) {
+            $contact = $contactsByEmail->get($row['email']);
+
+            return in_array($contact?->status, ['invalid_email', 'blocked'], true);
+        });
+        $cooldownBlocked = $ignoreCooldown
+            ? collect()
+            : $withEmail->filter(function (array $row) use ($contactsByEmail, $cooldownBlockedContactIds) {
+                $contact = $contactsByEmail->get($row['email']);
+
+                if (! $contact || $contact->email_opt_out || in_array($contact->status, ['invalid_email', 'blocked'], true)) {
+                    return false;
+                }
+
+                return $cooldownBlockedContactIds->has($contact->id);
+            });
+
+        return [
+            'total_target_contacts' => $rows->count(),
+            'with_email' => $withEmail->count(),
+            'opted_out' => $optedOut->count(),
+            'invalid_or_blocked' => $invalidOrBlocked->count(),
+            'cooldown_blocked' => $cooldownBlocked->count(),
+            'emailable_now' => $withEmail->count() - $optedOut->count() - $invalidOrBlocked->count() - $cooldownBlocked->count(),
+        ];
+    }
+
+    protected function contactsByEmailFromRows(Collection $rows): Collection
+    {
+        $emails = $rows
+            ->pluck('email')
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($emails->isEmpty()) {
+            return collect();
+        }
+
+        return Contact::query()
+            ->where('is_duplicate', false)
+            ->whereIn('email', $emails)
+            ->get()
+            ->keyBy('email');
+    }
+
+    protected function queueBatchRows(Campaign $campaign, Collection $rows, int $delaySeconds, int &$dispatched): void
+    {
+        $contactsByEmail = $this->contactsByEmailFromRows($rows);
+
+        foreach ($rows as $row) {
+            $contact = $this->createCampaignShadowContact($row, $contactsByEmail->get($row['email'] ?? null));
+
+            $recipient = CampaignRecipient::create([
+                'campaign_id' => $campaign->id,
+                'contact_id' => $contact->id,
+                'status' => 'queued',
+                'queued_at' => now(),
+            ]);
+
+            SendCampaignEmailJob::dispatch($recipient->id)
+                ->delay(now()->addSeconds($dispatched * $delaySeconds));
+
+            $dispatched++;
+        }
+    }
+
+    protected function createCampaignShadowContact(array $row, ?Contact $masterContact): Contact
+    {
+        $meta = is_array($row['meta'] ?? null) ? $row['meta'] : [];
+
+        return Contact::create([
+            'name' => $row['name'] ?? null,
+            'email' => null,
+            'phone' => $row['phone'] ?? null,
+            'province' => $row['province'] ?? null,
+            'city' => $row['city'] ?? null,
+            'education_level' => $row['education_level'] ?? null,
+            'school' => $row['school'] ?? null,
+            'field' => $row['field'] ?? null,
+            'participant_no' => $row['participant_no'] ?? null,
+            'participant_card_link' => $row['participant_card_link'] ?? null,
+            'telegram' => $row['telegram'] ?? null,
+            'source_sheet' => $row['source_sheet'] ?? null,
+            'source_year' => $row['source_year'] ?? null,
+            'segment' => null,
+            'status' => $masterContact?->status ?? ($row['status'] ?? 'active'),
+            'email_opt_out' => $masterContact?->email_opt_out ?? false,
+            'is_duplicate' => true,
+            'meta' => array_merge($meta, [
+                'campaign_shadow' => true,
+                'campaign_row_email' => $row['email'] ?? null,
+                'master_contact_id' => $masterContact?->id,
+            ]),
+        ]);
     }
 }

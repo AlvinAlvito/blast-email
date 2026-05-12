@@ -150,6 +150,68 @@ class ContactImportService
         ];
     }
 
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function readCampaignRows(string $filePath): array
+    {
+        @ini_set('memory_limit', '1024M');
+
+        $reader = IOFactory::createReaderForFile($filePath);
+        $reader->setReadDataOnly(true);
+        if (method_exists($reader, 'setReadEmptyCells')) {
+            $reader->setReadEmptyCells(false);
+        }
+
+        $rows = [];
+
+        foreach ($reader->listWorksheetInfo($filePath) as $sheetInfo) {
+            $sheetName = $sheetInfo['worksheetName'];
+            $year = $this->extractYear($sheetName);
+            $headers = $this->readHeaders($reader, $filePath, $sheetName);
+
+            if ($headers->isEmpty()) {
+                continue;
+            }
+
+            $this->assertRequiredHeaders($headers, $sheetName);
+
+            $chunkFilter = new SpreadsheetChunkReadFilter();
+            $chunkSize = 250;
+            $totalRows = (int) ($sheetInfo['totalRows'] ?? 0);
+
+            for ($startRow = 2; $startRow <= $totalRows; $startRow += $chunkSize) {
+                $chunkFilter->setRows($startRow, $chunkSize);
+                $chunkReader = IOFactory::createReaderForFile($filePath);
+                $chunkReader->setReadDataOnly(true);
+                if (method_exists($chunkReader, 'setReadEmptyCells')) {
+                    $chunkReader->setReadEmptyCells(false);
+                }
+                $chunkReader->setLoadSheetsOnly($sheetName);
+                $chunkReader->setReadFilter($chunkFilter);
+
+                $spreadsheet = $chunkReader->load($filePath);
+                $worksheet = $spreadsheet->getActiveSheet();
+                $highestColumn = $worksheet->getHighestColumn();
+                $endRow = min($startRow + $chunkSize - 1, $totalRows);
+                $sheetRows = $worksheet->rangeToArray("A{$startRow}:{$highestColumn}{$endRow}", null, true, true, false);
+
+                foreach ($sheetRows as $row) {
+                    if (collect($row)->filter(fn ($value) => filled($value))->isEmpty()) {
+                        continue;
+                    }
+
+                    $rows[] = $this->mapRow($headers, $row, $sheetName, $year);
+                }
+
+                $spreadsheet->disconnectWorksheets();
+                unset($spreadsheet);
+            }
+        }
+
+        return $rows;
+    }
+
     protected function readHeaders(IReader $reader, string $filePath, string $sheetName): Collection
     {
         $headerFilter = new SpreadsheetChunkReadFilter(1, 1);

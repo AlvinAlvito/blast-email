@@ -271,7 +271,7 @@ class AdminController extends Controller
                         $campaign->name,
                         $targetLabel,
                         $recipient->contact?->name ?: '-',
-                        $recipient->contact?->email ?: '-',
+                        $recipient->contact?->deliveryEmail() ?: '-',
                         $recipient->contact?->phone ?: '-',
                         $recipient->senderAccount?->from_address ?: '-',
                         $this->campaignRecipientStatusLabel($recipient->status),
