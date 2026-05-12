@@ -24,6 +24,7 @@ class SenderAccountController extends Controller
                 'campaigns' => Campaign::count(),
                 'queued_recipients' => CampaignRecipient::where('status', 'queued')->count(),
                 'sent_recipients' => CampaignRecipient::where('status', 'sent')->count(),
+                'problem_contacts' => Contact::whereIn('status', ['invalid_email', 'blocked'])->count(),
             ],
         ]);
     }
