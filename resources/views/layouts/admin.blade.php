@@ -109,7 +109,7 @@
                 @endif
             </div>
         @endif
-        @if ($errors->any())
+        @if (isset($errors) && $errors->any())
             <div class="flash" style="background:rgba(240,68,56,.08); border-color:rgba(240,68,56,.16);">
                 <strong>Perlu diperbaiki sebelum lanjut</strong>
                 <div class="summary">@foreach ($errors->all() as $error)<span>{{ $error }}</span>@endforeach</div>
